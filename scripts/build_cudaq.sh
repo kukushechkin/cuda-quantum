@@ -22,13 +22,13 @@
 # Prerequisites:
 # - git, ninja-build, cmake, python3, libpython3-dev, libstdc++-12-dev, libblas-dev (all available via apt install)
 # - LLVM binaries, libraries, and headers as built by scripts/build_llvm.sh.
-# - To include simulator backends that use cuQuantum the packages cuquantum and cuquantum-dev are needed. 
+# - To include simulator backends that use cuQuantum the packages cuquantum and cuquantum-dev are needed.
 # - Additional python dependencies for running and testing: lit pytest numpy (available via pip install)
 # - Additional dependencies for GPU-accelerated components: cuquantum, cutensor, cuda-11-8
 #
 # Note:
-# The CUDA Quantum build automatically detects whether GPUs are available and will 
-# only include any GPU based components if they are. It is possible to override this 
+# The CUDA Quantum build automatically detects whether GPUs are available and will
+# only include any GPU based components if they are. It is possible to override this
 # behavior and force building GPU components even if no GPU is detected by setting the
 # FORCE_COMPILE_GPU_COMPONENTS environment variable to true. This is useful primarily
 # when building docker images since GPUs may not be accessible during build.
@@ -82,7 +82,7 @@ if [ ! -d "$llvm_lib_dir" ]; then
     echo "Failed to find llvm libraries directory $llvm_lib_dir."
     if $is_sourced; then return 1; else exit 1; fi
   fi
-else 
+else
   echo "Configured C compiler: $CC"
   echo "Configured C++ compiler: $CXX"
 fi
@@ -91,14 +91,14 @@ fi
 cuda_version=`nvcc --version 2>/dev/null | grep -o 'release [0-9]*\.[0-9]*' | cut -d ' ' -f 2`
 cuda_major=`echo $cuda_version | cut -d '.' -f 1`
 cuda_minor=`echo $cuda_version | cut -d '.' -f 2`
-if [ ! -x "$(command -v nvidia-smi)" ] && [ "$FORCE_COMPILE_GPU_COMPONENTS" != "true" ] ; then # the second check here is to avoid having to use https://discuss.huggingface.co/t/how-to-deal-with-no-gpu-during-docker-build-time/28544 
+if [ ! -x "$(command -v nvidia-smi)" ] && [ "$FORCE_COMPILE_GPU_COMPONENTS" != "true" ] ; then # the second check here is to avoid having to use https://discuss.huggingface.co/t/how-to-deal-with-no-gpu-during-docker-build-time/28544
   echo "No GPU detected - GPU backends will be omitted from the build."
   custatevec_flag=""
 elif [ "$cuda_version" = "" ] || [ "$cuda_major" -lt "11" ] || ([ "$cuda_minor" -lt "8" ] && [ "$cuda_major" -eq "11" ]); then
   echo "CUDA version requirement not satisfied (required: >= 11.8, got: $cuda_version)."
   echo "GPU backends will be omitted from the build."
   custatevec_flag=""
-else 
+else
   echo "CUDA version $cuda_version detected."
   if [ ! -d "$CUQUANTUM_INSTALL_PREFIX" ]; then
     echo "No cuQuantum installation detected. Please set the environment variable CUQUANTUM_INSTALL_PREFIX to enable cuQuantum integration."
@@ -112,17 +112,23 @@ fi
 
 # Prepare the build directory
 mkdir -p "$CUDAQ_INSTALL_PREFIX/bin"
-mkdir -p "$working_dir/build" && cd "$working_dir/build" && rm -rf * 
-mkdir -p logs && rm -rf logs/* 
+mkdir -p "$working_dir/build" && cd "$working_dir/build" && rm -rf *
+mkdir -p logs && rm -rf logs/*
 
 # Determine linker and linker flags
+LLD_LINKER_NAME="ld.lld"
 cmake_common_linker_flags_init=""
-if [ -x "$(command -v "$LLVM_INSTALL_PREFIX/bin/ld.lld")" ]; then
-  echo "Configuring nvq++ to use the lld linker by default."
-  NVQPP_LD_PATH="$LLVM_INSTALL_PREFIX/bin/ld.lld"
+if [ -x "$(command -v "$LLVM_INSTALL_PREFIX/bin/$LLD_LINKER_NAME")" ]; then
+  echo "Configuring nvq++ to use the $LLD_LINKER_NAME linker by default."
+  NVQPP_LD_PATH="$LLVM_INSTALL_PREFIX/bin/$LLD_LINKER_NAME"
 fi
 
-# Generate CMake files 
+# llvm does not include ld64.llm with --relocation support yet, but we can use Apple-provided one
+if ${CUDAQ_IS_APPLE}; then
+  NVQPP_LD_PATH=$(/usr/bin/xcrun -f ld)
+fi
+
+# Generate CMake files
 # (utils are needed for custom testing tools, e.g. CircuitCheck)
 echo "Preparing CUDA Quantum build with LLVM installation in $LLVM_INSTALL_PREFIX..."
 cmake_args="-G Ninja "$repo_root" \
@@ -138,7 +144,7 @@ cmake_args="-G Ninja "$repo_root" \
   -DCMAKE_MODULE_LINKER_FLAGS_INIT="$cmake_common_linker_flags_init" \
   -DCMAKE_SHARED_LINKER_FLAGS_INIT="$cmake_common_linker_flags_init" \
   $custatevec_flag"
-if $verbose; then 
+if $verbose; then
   cmake $cmake_args
 else
   cmake $cmake_args 2> logs/cmake_error.txt 1> logs/cmake_output.txt
@@ -147,7 +153,7 @@ fi
 # Build and install CUDAQ
 echo "Building CUDA Quantum with configuration $build_configuration..."
 logs_dir=`pwd`/logs
-if $verbose; then 
+if $verbose; then
   ninja install
 else
   echo "The progress of the build is being logged to $logs_dir/ninja_output.txt."
