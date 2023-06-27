@@ -67,7 +67,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED on)
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
-# Set warnings as errors by default. 
+# Set warnings as errors by default.
 # Individual targets and the command line invocation can override this behavior.
 if(NOT DEFINED CMAKE_COMPILE_WARNING_AS_ERROR)
   set(CMAKE_COMPILE_WARNING_AS_ERROR ON)
@@ -109,7 +109,7 @@ option(CUDAQ_TEST_MOCK_SERVERS "Enable Remote QPU Tests via Mock Servers." OFF)
 option(CUDAQ_DISABLE_RUNTIME "Build without the CUDA Quantum runtime, just the compiler toolchain." OFF)
 option(CUDAQ_SKIP_MPI "Do not build with MPI, even when it is available." OFF)
 
-if (CUDAQ_BUILD_RELOCATABLE_PACKAGE) 
+if (CUDAQ_BUILD_RELOCATABLE_PACKAGE)
   if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     message(FATAL_ERROR "You must provide an install prefix if you are building the relocatable package.")
   endif()
@@ -282,22 +282,31 @@ if (NOT CUDAQ_BUILD_RELOCATABLE_PACKAGE)
   foreach(dir ${CMAKE_CXX_IMPLICIT_LINK_DIRECTORIES})
     set(CUDAQ_CXX_NVQPP_LINK_STR "${CUDAQ_CXX_NVQPP_LINK_STR} -L${dir}")
   endforeach()
-else()
-  # If we are building the relocatable package, 
-  # we need to do a bit more for Apple Mac
-  if (APPLE) 
+
+  if (APPLE)
     foreach(dir ${CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES})
-      if (${dir} MATCHES ".*/c.*/v1") 
+      if(${dir} MATCHES ".*sdk/usr/include.*")
+        # We want the driver to include the SDK/usr/include dir
+        set(CUDAQ_CXX_NVQPP_INCLUDE_STR "${CUDAQ_CXX_NVQPP_INCLUDE_STR} -I ${dir}")
+      endif()
+    endforeach()
+  endif()
+else()
+  # If we are building the relocatable package,
+  # we need to do a bit more for Apple Mac
+  if (APPLE)
+    foreach(dir ${CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES})
+      if (${dir} MATCHES ".*/c.*/v1")
         # Copy the bundled c++ includes from theClang install to ours
         file(COPY ${dir} DESTINATION ${CMAKE_INSTALL_PREFIX}/include/c++/)
         # We want the driver to include the bundled C++ headers from Clang
         set(CUDAQ_CXX_NVQPP_INCLUDE_STR "${CUDAQ_CXX_NVQPP_INCLUDE_STR} -I ${CMAKE_INSTALL_PREFIX}/include/c++/v1")
-      elseif(${dir} MATCHES ".*sdk/usr/include") 
+      elseif(${dir} MATCHES ".*sdk/usr/include")
         # We want the driver to include the SDK/usr/include dir
         set(CUDAQ_CXX_NVQPP_INCLUDE_STR "${CUDAQ_CXX_NVQPP_INCLUDE_STR} -I ${dir}")
-      endif()  
+      endif()
     endforeach()
-  endif() 
+  endif()
 endif()
 
 configure_file("${CMAKE_SOURCE_DIR}/include/nvqpp_config.h.in"
@@ -312,7 +321,7 @@ set(FMT_INSTALL ON)
 add_subdirectory(tpls/fmt)
 include_directories(SYSTEM tpls/json/include)
 
-# Add spdlog 
+# Add spdlog
 set(SPDLOG_BUILD_SHARED OFF)
 set(SPDLOG_FMT_EXTERNAL ON)
 add_subdirectory(tpls/spdlog)
@@ -338,13 +347,13 @@ if(CMAKE_CUDA_COMPILER)
 endif()
 
 # Check for CURL and OpenSSL
-find_package(CURL COMPONENTS HTTP HTTPS QUIET) 
+find_package(CURL COMPONENTS HTTP HTTPS QUIET)
 find_package(OpenSSL QUIET)
 
 # Optionally build with MPI
 if (NOT CUDAQ_SKIP_MPI)
   find_package(MPI COMPONENTS CXX)
-  if (MPI_FOUND) 
+  if (MPI_FOUND)
     message(STATUS "MPI CXX Found: ${MPIEXEC}")
   endif()
 endif()
@@ -371,8 +380,8 @@ if(CUDAQ_BUILD_TESTS)
   add_subdirectory(tpls/googletest-src)
   # Bug in GCC 12 leads to spurious warnings (-Wrestrict)
   # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=105329
-  if (CMAKE_COMPILER_IS_GNUCXX 
-    AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0.0 
+  if (CMAKE_COMPILER_IS_GNUCXX
+    AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0.0
     AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 13.0.0)
     target_compile_options(gtest PUBLIC --param=evrp-mode=legacy)
   endif()
@@ -394,7 +403,7 @@ if (CUDAQ_ENABLE_PYTHON)
   add_subdirectory(python)
 endif()
 
-if (CUDAQ_BUILD_RELOCATABLE_PACKAGE) 
+if (CUDAQ_BUILD_RELOCATABLE_PACKAGE)
   # Grab the Clang system headers / resource-dir
   install(DIRECTORY ${LLVM_BINARY_DIR}/lib/clang/ DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/clang)
 
