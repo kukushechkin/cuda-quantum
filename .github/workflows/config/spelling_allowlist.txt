@@ -19,6 +19,7 @@ Hadamard
 Hadamards
 Hamiltonian
 Hamiltonians
+IQM
 IonQ
 JIT
 JSON
@@ -70,6 +71,7 @@ controlled
 coprocessor
 coprocessors
 copyable
+cortex-cli
 cuQuantum
 deallocate
 deallocated
@@ -98,6 +100,7 @@ executables
 inlining
 instantiation
 instantiations
+json
 namespace
 namespaces
 natively

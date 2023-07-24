@@ -6,11 +6,15 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-import cudaq, pytest, os, time
-from mock_iqm_server import startServer
-from mock_iqm_cortex_cli import write_a_mock_tokens_file
-from multiprocessing import Process
+import os
 import tempfile
+import time
+from multiprocessing import Process
+
+import cudaq
+import pytest
+from utils.mock_qpu.iqm.mock_iqm_cortex_cli import write_a_mock_tokens_file
+from utils.mock_qpu.iqm.mock_iqm_server import startServer
 
 # Define the port for the mock server
 port = 9100

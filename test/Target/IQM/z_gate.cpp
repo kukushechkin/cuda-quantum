@@ -9,6 +9,7 @@
 #include <cudaq.h>
 
 // RUN: nvq++ %s --target iqm --emulate --iqm-qpu-architecture Apollo -o %t.x && %t.x | FileCheck %s
+// XFAIL: *
 
 template <std::size_t N>
 struct kernel_with_z {

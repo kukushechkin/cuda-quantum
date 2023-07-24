@@ -7,22 +7,20 @@
 # ============================================================================ #
 import asyncio
 import uuid
-from fastapi import FastAPI, Request, HTTPException
 from typing import Optional
-import uvicorn, uuid
-from pydantic import BaseModel
 
 # Use IQM Client Tools to verify data structures
 import iqm_client
+import uvicorn
+from fastapi import FastAPI, HTTPException, Request
+from pydantic import BaseModel
 
-
-# Testing consts
+# Testing constants
 good_access_token = "Bearer good_access_token"
 server_qpu_architecture = "Apollo"
 operations = []  # TBA
 qubits = []  # TBA
 qubit_connectivity = []  # TBA
-
 
 # Define the REST Server App
 app = FastAPI()
@@ -77,22 +75,22 @@ async def compile_and_submit_job(job: Job):
             status=job.status,
             metadata=job.metadata,
             message="Exactly one circuit must be provided, got {}".format(
-                len(circuits)
-            ),
+                len(circuits)),
         )
         createdJobs[job.id] = job
         return
 
     circuit = circuits[0]
     measurements = [
-        instruction
-        for instruction in circuit.instructions
+        instruction for instruction in circuit.instructions
         if instruction.name == "measurement"
     ]
     if len(measurements) == 0:
         job.status = iqm_client.Status.FAILED
         job.result = iqm_client.RunResult(
-            status=job.status, metadata=job.metadata, message="Circuit contains no measurements"
+            status=job.status,
+            metadata=job.metadata,
+            message="Circuit contains no measurements",
         )
         createdJobs[job.id] = job
         return
@@ -108,7 +106,8 @@ async def compile_and_submit_job(job: Job):
         job.result = iqm_client.RunResult(
             status=job.status,
             metadata=job.metadata,
-            message="Some circuits in the batch have gates between uncoupled qubits:",
+            message=
+            "Some circuits in the batch have gates between uncoupled qubits:",
         )
         createdJobs[job.id] = job
         return
@@ -123,8 +122,8 @@ async def compile_and_submit_job(job: Job):
     # populate counts according to amount of qubits in each measurement
     qubits_in_measurement = len(measured_qubits)
     counts = {
-        measurement_string: 1
-        for measurement_string in generate_measurement_strings(qubits_in_measurement)
+        measurement_string: 1 for measurement_string in
+        generate_measurement_strings(qubits_in_measurement)
     }
 
     job.counts_batch = [Counts(counts=counts, measurement_keys=["mk1"])]
@@ -135,7 +134,8 @@ async def compile_and_submit_job(job: Job):
 
 
 @app.get("/quantum-architecture")
-async def get_quantum_architecture(request: Request) -> iqm_client.QuantumArchitecture:
+async def get_quantum_architecture(
+        request: Request) -> iqm_client.QuantumArchitecture:
     """Get the quantum architecture"""
 
     access_token = request.headers.get("Authorization")
@@ -148,14 +148,12 @@ async def get_quantum_architecture(request: Request) -> iqm_client.QuantumArchit
             operations=operations,
             qubits=qubits,
             qubit_connectivity=qubit_connectivity,
-        )
-    )
+        ))
 
 
 @app.post("/jobs")
-async def post_jobs(
-    job_request: iqm_client.RunRequest, request: Request
-) -> PostJobsResponse:
+async def post_jobs(job_request: iqm_client.RunRequest,
+                    request: Request) -> PostJobsResponse:
     """Register a new job and start execution"""
 
     access_token = request.headers.get("Authorization")
@@ -172,7 +170,7 @@ async def post_jobs(
     )
     createdJobs[new_job_id] = new_job
 
-    # start async compilation and execution
+    # start compilation and execution
     asyncio.create_task(compile_and_submit_job(new_job))
     await asyncio.sleep(0.0)
 
@@ -207,9 +205,12 @@ async def get_jobs(job_id: str, request: Request):
 
     # TODO: return the actual counts, check the requested measurements
     results = {
-        "status": job.status,
-        "message": job.result.message if job.result and job.result.message else None,
-        "counts_batch": job.counts_batch,
+        "status":
+            job.status,
+        "message":
+            job.result.message if job.result and job.result.message else None,
+        "counts_batch":
+            job.counts_batch,
     }
 
     return results

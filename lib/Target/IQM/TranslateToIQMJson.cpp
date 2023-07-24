@@ -97,13 +97,14 @@ static LogicalResult emitOperation(nlohmann::json &json, Emitter &emitter,
 
   std::vector<std::string> qubits;
 
-  if(name == "z") {
-      if (optor.getControls().size() != 1)
-        optor.emitError("IQM gate set only supports Z gates with exactly one control.");
-      json["name"] = "cz";
-      json["args"] = nlohmann::json::object();
-      for (auto control : optor.getControls())
-        qubits.push_back(emitter.getOrAssignName(control).str());
+  if (name == "z") {
+    if (optor.getControls().size() != 1)
+      optor.emitError(
+          "IQM gate set only supports Z gates with exactly one control.");
+    json["name"] = "cz";
+    json["args"] = nlohmann::json::object();
+    for (auto control : optor.getControls())
+      qubits.push_back(emitter.getOrAssignName(control).str());
   } else {
     json["name"] = name;
 
@@ -113,7 +114,9 @@ static LogicalResult emitOperation(nlohmann::json &json, Emitter &emitter,
     auto parameter0 = getParameterValueAsDouble(optor.getParameters()[0]);
     auto parameter1 = getParameterValueAsDouble(optor.getParameters()[1]);
 
-    auto convertToFullTurns = [](double &angleInRadians) { return angleInRadians/ (2*M_PI);};
+    auto convertToFullTurns = [](double &angleInRadians) {
+      return angleInRadians / (2 * M_PI);
+    };
     json["args"]["angle_t"] = convertToFullTurns(*parameter0);
     json["args"]["phase_t"] = convertToFullTurns(*parameter1);
   }
@@ -138,15 +141,12 @@ static LogicalResult emitOperation(nlohmann::json &json, Emitter &emitter,
   json["qubits"] = qubits;
   json["args"] = nlohmann::json::object();
   auto join_lambda = [](std::string a, std::string b) {
-      return a + std::string("_") + b;
+    return a + std::string("_") + b;
   };
-  json["args"]["key"] = "m_" + (qubits.empty() ? "" :
-    std::accumulate(
-      ++qubits.begin(),
-      qubits.end(),
-      *qubits.begin(),
-      join_lambda
-  ));
+  json["args"]["key"] =
+      "m_" + (qubits.empty() ? ""
+                             : std::accumulate(++qubits.begin(), qubits.end(),
+                                               *qubits.begin(), join_lambda));
   return success();
 }
 
@@ -172,7 +172,8 @@ static LogicalResult emitOperation(nlohmann::json &json, Emitter &emitter,
             op.getName().getDialectNamespace().equals("cc") ||
             op.getName().getDialectNamespace().equals("arith"))
           return success();
-        return op.emitOpError() << "unable to translate op to IQM Json " << op.getName().getIdentifier().str();
+        return op.emitOpError() << "unable to translate op to IQM Json "
+                                << op.getName().getIdentifier().str();
       });
 }
 
