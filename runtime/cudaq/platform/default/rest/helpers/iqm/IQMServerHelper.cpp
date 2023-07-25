@@ -238,7 +238,7 @@ IQMServerHelper::generateRequestHeader() const {
   std::map<std::string, std::string> headers{
       {"Content-Type", "application/json"},
       {"Connection", "keep-alive"},
-      {"Host", "localhost"},
+      {"User-Agent", "cudaq/IQMServerHelper"},
       {"Accept", "*/*"}};
   auto apiToken = readApiToken();
   if (apiToken.has_value()) {
