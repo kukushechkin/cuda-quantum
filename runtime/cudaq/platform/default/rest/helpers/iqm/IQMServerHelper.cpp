@@ -165,16 +165,19 @@ public:
 ServerJobPayload
 IQMServerHelper::createJob(std::vector<KernelExecution> &circuitCodes) {
   std::vector<ServerMessage> messages;
-  ServerMessage message = ServerMessage::object();
-  message["circuits"] = ServerMessage::array();
-  message["shots"] = shots;
 
+  // cuda-quantum expects every circuit to be a separate job,
+  // so we cannot use the batch mode
   for (auto &circuitCode : circuitCodes) {
+    ServerMessage message = ServerMessage::object();
+    message["circuits"] = ServerMessage::array();
+    message["shots"] = shots;
+
     ServerMessage yac = nlohmann::json::parse(circuitCode.code);
     yac["name"] = circuitCode.name;
     message["circuits"].push_back(yac);
+    messages.push_back(message);
   }
-  messages.push_back(message);
 
   // Get the headers
   RestHeaders headers = generateRequestHeader();
@@ -216,8 +219,8 @@ IQMServerHelper::processResults(ServerMessage &postJobResponse) {
                              ", reason: " + jobMessage);
   }
 
-  auto counts = postJobResponse["counts_batch"];
-  if (counts.is_null()) {
+  auto counts_batch = postJobResponse["counts_batch"];
+  if (counts_batch.is_null()) {
     throw std::runtime_error("No counts in the response");
   }
 
@@ -225,7 +228,7 @@ IQMServerHelper::processResults(ServerMessage &postJobResponse) {
   // GlobalRegisterName of `sample_results`
   std::vector<ExecutionResult> srs;
 
-  for (auto &counts : counts.get<std::vector<ServerMessage>>()) {
+  for (auto &counts : counts_batch.get<std::vector<ServerMessage>>()) {
     srs.push_back(ExecutionResult(
         counts["counts"].get<std::unordered_map<std::string, std::size_t>>()));
   }

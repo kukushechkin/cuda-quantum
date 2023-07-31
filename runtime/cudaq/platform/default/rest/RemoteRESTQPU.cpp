@@ -337,7 +337,7 @@ public:
             cudaq::opt::createQuakeObserveAnsatzPass(binarySymplecticForm[0]));
         if (failed(pm.run(tmpModuleOp)))
           throw std::runtime_error("Could not apply measurements to ansatz.");
-        runPassPipeline("canonicalize", tmpModuleOp);
+        runPassPipeline(passPipelineConfig, tmpModuleOp);
         modules.emplace_back(term.to_string(false), tmpModuleOp);
       }
     } else
