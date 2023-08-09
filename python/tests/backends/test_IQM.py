@@ -106,7 +106,6 @@ def test_iqm_observe():
 
     # Run the observe task on IQM synchronously
     res = cudaq.observe(kernel, hamiltonian, 0.59, shots_count=shots)
-    print(f"res.counts() = {res.counts()}")
     want_expectation_value = -1.71
 
     assert assert_close(want_expectation_value, res.expectation_z(), 5e-2)

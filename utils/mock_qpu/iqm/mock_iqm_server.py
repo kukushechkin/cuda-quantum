@@ -58,16 +58,16 @@ class PostJobsResponse(BaseModel):
 createdJobs: dict[str, Job] = {}
 
 
-def generate_measurement_strings(n, bs=""):
+def _generate_measurement_strings(n, bs=""):
     if n - 1:
-        yield from generate_measurement_strings(n - 1, bs + "0")
-        yield from generate_measurement_strings(n - 1, bs + "1")
+        yield from _generate_measurement_strings(n - 1, bs + "0")
+        yield from _generate_measurement_strings(n - 1, bs + "1")
     else:
         yield bs + "0"
         yield bs + "1"
 
 
-def make_phased_rx_unitary_matrix(theta: float, phi: float) -> np.ndarray:
+def _make_phased_rx_unitary_matrix(theta: float, phi: float) -> np.ndarray:
     """Return the unitary matrix for a phased RX gate."""
     cos = math.cos(theta / 2)
     sin = math.sin(theta / 2)
@@ -77,7 +77,7 @@ def make_phased_rx_unitary_matrix(theta: float, phi: float) -> np.ndarray:
     return r_gate
 
 
-def make_cz_unitary_matrix(size: int) -> np.ndarray:
+def _make_cz_unitary_matrix(size: int) -> np.ndarray:
     """Return the unitary matrix for a CZ gate."""
     cz = np.eye(size)
     cz[-1, -1] = -1
@@ -121,6 +121,105 @@ def _partial_trace(rho, keep):
     return rho
 
 
+def _validate_measurements(job: Job, circuit: iqm_client.Circuit) -> bool:
+    """Check that the circuit contains measurements"""
+    measurements = [
+        instruction for instruction in circuit.instructions
+        if instruction.name == "measurement"
+    ]
+    if len(measurements) == 0:
+        job.status = iqm_client.Status.FAILED
+        job.result = iqm_client.RunResult(
+            status=job.status,
+            metadata=job.metadata,
+            message="Circuit contains no measurements",
+        )
+        createdJobs[job.id] = job
+        return False
+    return True
+
+
+def _validate_connectivity(job: Job, circuit: iqm_client.Circuit) -> bool:
+    """C""check connectivity partially matches Apollo"""
+    qubit_pairs = [
+        instruction.qubits
+        for instruction in circuit.instructions
+        if len(instruction.qubits) == 2
+    ]
+    if ("QB2", "QB3") in qubit_pairs or ("QB3", "QB2") in qubit_pairs:
+        job.status = iqm_client.Status.FAILED
+        job.result = iqm_client.RunResult(
+            status=job.status,
+            metadata=job.metadata,
+            message=
+            "Some circuits in the batch have gates between uncoupled qubits:",
+        )
+        createdJobs[job.id] = job
+        return False
+    return True
+
+
+def _gather_circuit_qubits(
+        instructions: list[iqm_client.Instruction]) -> (set[int], int):
+    """Gather qubits from the circuit"""
+    measurement_qubits: set[int] = set()
+    all_qubits: set[int] = set()
+    for instruction in instructions:
+        all_qubits.update(
+            set(
+                _extract_qubit_position_from_qubit_name(qb)
+                for qb in list(instruction.qubits)))
+        if instruction.name == "measurement":
+            measurement_qubits.update(
+                set(
+                    _extract_qubit_position_from_qubit_name(qb)
+                    for qb in list(instruction.qubits)))
+    return measurement_qubits, len(all_qubits)
+
+
+def _simulate_circuit(instructions: list[iqm_client.Instruction],
+                      shots: int) -> dict[str, int]:
+    """Simulate the circuit"""
+    # extract qubits information from measurements
+    measurement_qubits_positions, total_qubits = _gather_circuit_qubits(
+        instructions)
+
+    # calculate circuit operator and measure qubits
+    operator: np.ndarray = np.eye(2**total_qubits, dtype=complex)
+    for instruction in instructions:
+        if instruction.name == "phased_rx":
+            qubit_position = _extract_qubit_position_from_qubit_name(
+                instruction.qubits[0])
+            r_gate = _make_phased_rx_unitary_matrix(
+                float(instruction.args["angle_t"]) * (2.0 * np.pi),
+                float(instruction.args["phase_t"]) * (2.0 * np.pi))
+            another_operator = _apply_one_qubit_gate_to_qubit_at_position(
+                r_gate, qubit_position, total_qubits)
+        elif instruction.name == "cz":
+            another_operator = _make_cz_unitary_matrix(total_qubits**2)
+        else:
+            continue
+        operator = np.matmul(another_operator, operator)
+
+    # apply the constructed operator to the initial state
+    initial_state = np.array([0] * 2**total_qubits, dtype=complex)
+    initial_state[0] = 1
+    final_state = np.matmul(operator, initial_state)
+
+    # density matrix
+    density_matrix = np.outer(final_state, np.conj(final_state))
+
+    # make partial density matrix for the measured subset of qubits
+    partial_density_matrix = _partial_trace(density_matrix,
+                                            measurement_qubits_positions)
+    probabilities = np.diag(partial_density_matrix)
+    return {
+        ms: int(prob * shots) for ms, prob in zip(
+            _generate_measurement_strings(len(measurement_qubits_positions)),
+            probabilities)
+    }
+
+
 async def compile_and_submit_job(job: Job):
     """Analyze measurements and construct corresponding counts"""
     request = job.metadata.request
@@ -128,92 +227,16 @@ async def compile_and_submit_job(job: Job):
 
     job.counts_batch = []
     for circuit in circuits:
-        measurements = [
-            instruction for instruction in circuit.instructions
-            if instruction.name == "measurement"
-        ]
-        if len(measurements) == 0:
-            job.status = iqm_client.Status.FAILED
-            job.result = iqm_client.RunResult(
-                status=job.status,
-                metadata=job.metadata,
-                message="Circuit contains no measurements",
-            )
-            createdJobs[job.id] = job
+        if not _validate_measurements(job, circuit):
             return
 
-        # check connectivity partially matches Apollo
-        qubit_pairs = [
-            instruction.qubits
-            for instruction in circuit.instructions
-            if len(instruction.qubits) == 2
-        ]
-        if ("QB2", "QB3") in qubit_pairs or ("QB3", "QB2") in qubit_pairs:
-            job.status = iqm_client.Status.FAILED
-            job.result = iqm_client.RunResult(
-                status=job.status,
-                metadata=job.metadata,
-                message=
-                "Some circuits in the batch have gates between uncoupled qubits:",
-            )
-            createdJobs[job.id] = job
+        if not _validate_connectivity(job, circuit):
             return
 
         instructions = circuit.instructions
 
-        # extract measured qubits from instructions
-        measurement_qubits = []
-        all_qubits = []
-        for instruction in instructions:
-            all_qubits += list(instruction.qubits)
-            if instruction.name == "measurement":
-                measurement_qubits += list(instruction.qubits)
-        measurement_qubits = list(set(measurement_qubits))
-        all_qubits = list(set(all_qubits))
-
-        total_qubits = len(all_qubits)
-        operator: np.ndarray = np.eye(2**total_qubits, dtype=complex)
-
-        # calculate circuit operator and measure qubits
-        for instruction in instructions:
-            if instruction.name == "phased_rx":
-                qubit_position = _extract_qubit_position_from_qubit_name(
-                    instruction.qubits[0])
-                r_gate = make_phased_rx_unitary_matrix(
-                    float(instruction.args["angle_t"]) * (2.0 * np.pi),
-                    float(instruction.args["phase_t"]) * (2.0 * np.pi))
-                another_operator = _apply_one_qubit_gate_to_qubit_at_position(
-                    r_gate, qubit_position, total_qubits)
-            elif instruction.name == "cz":
-                another_operator = make_cz_unitary_matrix(total_qubits**2)
-            else:
-                continue
-            operator = np.matmul(another_operator, operator)
-
-        # assuming the initial state is |0...0>
-        initial_state = np.array([0] * 2**total_qubits, dtype=complex)
-        initial_state[0] = 1
-        final_state = np.matmul(operator, initial_state)
-
-        # density matrix
-        density_matrix = np.outer(final_state, np.conj(final_state))
-
-        counts = {}
-        measurement_qubits_positions = [
-            _extract_qubit_position_from_qubit_name(qubit)
-            for qubit in sorted(measurement_qubits)
-        ]
-
-        # make partial density matrix for the mreasured subset of qubits
-        partial_density_matrix = _partial_trace(density_matrix,
-                                                measurement_qubits_positions)
-        probabilities = np.diag(partial_density_matrix)
-
-        i = 0
-        for measurement_string in generate_measurement_strings(
-                len(measurement_qubits)):
-            counts[measurement_string] = int(probabilities[i] * request.shots)
-            i += 1
+        # Simulate the circuit
+        counts = _simulate_circuit(instructions, request.shots)
 
         job.counts_batch.append(
             Counts(counts=counts, measurement_keys=[circuit.name]))
