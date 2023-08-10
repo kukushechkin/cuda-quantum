@@ -95,9 +95,9 @@ def test_iqm_observe():
     shots = 100000
     kernel, theta = cudaq.make_kernel(float)
     qreg = kernel.qalloc(2)
-    kernel.x(qreg[1])
-    kernel.ry(theta, qreg[0])
-    kernel.cx(qreg[0], qreg[1])
+    kernel.x(qreg[0])
+    kernel.ry(theta, qreg[1])
+    kernel.cx(qreg[1], qreg[0])
 
     # Define its spin Hamiltonian.
     hamiltonian = (5.907 - 2.1433 * spin.x(0) * spin.x(1) -

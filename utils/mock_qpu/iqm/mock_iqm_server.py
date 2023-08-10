@@ -58,6 +58,24 @@ class PostJobsResponse(BaseModel):
 createdJobs: dict[str, Job] = {}
 
 
+def contract_einsum(A: np.array, U: np.array, indices: list[int],
+                    a_dims: list[int], arity):
+    """Unitary operator A acting on the given subsystems of the register,
+    multiplied by the full-register propagator U."""
+    A = A.reshape(2 * a_dims)
+    u_inds = np.arange(2 * arity)
+
+    # some u_inds are contracted and replaced with new indices
+    new_inds = np.arange(len(a_dims)) + len(u_inds)
+    a_inds = list(new_inds) + indices
+
+    # output inds are same as input inds, but with the contracted ones replaced with the new ones
+    out_inds = u_inds.copy()
+    out_inds[indices] = new_inds
+
+    return np.einsum(A, a_inds, U, u_inds, out_inds)
+
+
 def _generate_measurement_strings(n, bs=""):
     if n - 1:
         yield from _generate_measurement_strings(n - 1, bs + "0")
@@ -77,11 +95,10 @@ def _make_phased_rx_unitary_matrix(theta: float, phi: float) -> np.ndarray:
     return r_gate
 
 
-def _make_cz_unitary_matrix(size: int) -> np.ndarray:
+def _make_cz_unitary_matrix(qubits: int) -> np.ndarray:
     """Return the unitary matrix for a CZ gate."""
-    cz = np.eye(size)
-    cz[-1, -1] = -1
-    return cz
+    CZ = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, -1]])
+    return CZ
 
 
 def _extract_qubit_position_from_qubit_name(qubit_names: str) -> int:
@@ -89,21 +106,8 @@ def _extract_qubit_position_from_qubit_name(qubit_names: str) -> int:
     return int(qubit_names[2:]) - 1
 
 
-def _apply_one_qubit_gate_to_qubit_at_position(
-        gate: np.ndarray, qubit_position: int,
-        overall_qubits: int) -> np.ndarray:
-    """Apply a one-qubit gate to a qubit at a given position."""
-    another_operator = np.eye(1)
-    for i in range(overall_qubits):
-        if i == qubit_position:
-            another_operator = np.kron(gate, another_operator)
-        else:
-            another_operator = np.kron(np.eye(2), another_operator)
-    return another_operator
-
-
-def _partial_trace(rho, keep):
-    N = int(np.log2(rho.shape[0]))
+def _partial_trace(N, rho, keep):
+    """Calculate the partial trace of a density matrix"""
     trace_out = sorted(set(range(N)) - set(keep), reverse=True)
 
     if len(trace_out) == 0:
@@ -185,7 +189,11 @@ def _simulate_circuit(instructions: list[iqm_client.Instruction],
         instructions)
 
     # calculate circuit operator and measure qubits
+    dims = [2] * total_qubits
+    D = np.prod(dims)
     operator: np.ndarray = np.eye(2**total_qubits, dtype=complex)
+    operator = operator.reshape(2 * dims)
+
     for instruction in instructions:
         if instruction.name == "phased_rx":
             qubit_position = _extract_qubit_position_from_qubit_name(
@@ -193,13 +201,22 @@ def _simulate_circuit(instructions: list[iqm_client.Instruction],
             r_gate = _make_phased_rx_unitary_matrix(
                 float(instruction.args["angle_t"]) * (2.0 * np.pi),
                 float(instruction.args["phase_t"]) * (2.0 * np.pi))
-            another_operator = _apply_one_qubit_gate_to_qubit_at_position(
-                r_gate, qubit_position, total_qubits)
+            operator = contract_einsum(r_gate, operator, [qubit_position],
+                                       [2] * 1, total_qubits)
         elif instruction.name == "cz":
-            another_operator = _make_cz_unitary_matrix(total_qubits**2)
+            control_qubit_position = _extract_qubit_position_from_qubit_name(
+                instruction.qubits[0])
+            target_qubit_position = _extract_qubit_position_from_qubit_name(
+                instruction.qubits[1])
+            cz_gate = _make_cz_unitary_matrix(total_qubits)
+            operator = contract_einsum(
+                cz_gate, operator,
+                [control_qubit_position, target_qubit_position], [2] * 2,
+                total_qubits)
         else:
             continue
-        operator = np.matmul(another_operator, operator)
+
+    operator = operator.reshape((D, D))
 
     # apply the constructed operator to the initial state
     initial_state = np.array([0] * 2**total_qubits, dtype=complex)
@@ -210,9 +227,9 @@ def _simulate_circuit(instructions: list[iqm_client.Instruction],
     density_matrix = np.outer(final_state, np.conj(final_state))
 
     # make partial density matrix for the measured subset of qubits
-    partial_density_matrix = _partial_trace(density_matrix,
-                                            measurement_qubits_positions)
-    probabilities = np.diag(partial_density_matrix)
+    partial_trace = _partial_trace(total_qubits, density_matrix,
+                                   measurement_qubits_positions)
+    probabilities = np.diag(partial_trace)
     return {
         ms: int(prob * shots) for ms, prob in zip(
             _generate_measurement_strings(len(measurement_qubits_positions)),
