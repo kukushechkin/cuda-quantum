@@ -58,8 +58,9 @@ class PostJobsResponse(BaseModel):
 createdJobs: dict[str, Job] = {}
 
 
-def contract_einsum(A: np.array, U: np.array, indices: list[int],
-                    a_dims: list[int], arity):
+def _contract_einsum(
+    A: np.ndarray, U: np.ndarray, indices: list[int], a_dims: list[int], arity
+):
     """Unitary operator A acting on the given subsystems of the register,
     multiplied by the full-register propagator U."""
     A = A.reshape(2 * a_dims)
@@ -95,7 +96,7 @@ def _make_phased_rx_unitary_matrix(theta: float, phi: float) -> np.ndarray:
     return r_gate
 
 
-def _make_cz_unitary_matrix(qubits: int) -> np.ndarray:
+def _make_cz_unitary_matrix() -> np.ndarray:
     """Return the unitary matrix for a CZ gate."""
     CZ = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, -1]])
     return CZ
@@ -112,7 +113,8 @@ def _partial_trace(N, rho, keep):
 
     if len(trace_out) == 0:
         return rho.reshape(
-            2**N, 2**N)  # No tracing needed, return the reshaped matrix
+            2**N, 2**N
+        )  # No tracing needed, return the reshaped matrix
 
     # Reshape into tensor with shape (2,2,...,2,2,...,2), 2N times
     rho = rho.reshape([2] * 2 * N)
@@ -128,7 +130,8 @@ def _partial_trace(N, rho, keep):
 def _validate_measurements(job: Job, circuit: iqm_client.Circuit) -> bool:
     """Check that the circuit contains measurements"""
     measurements = [
-        instruction for instruction in circuit.instructions
+        instruction
+        for instruction in circuit.instructions
         if instruction.name == "measurement"
     ]
     if len(measurements) == 0:
@@ -155,71 +158,79 @@ def _validate_connectivity(job: Job, circuit: iqm_client.Circuit) -> bool:
         job.result = iqm_client.RunResult(
             status=job.status,
             metadata=job.metadata,
-            message=
-            "Some circuits in the batch have gates between uncoupled qubits:",
+            message="Some circuits in the batch have gates between uncoupled qubits:",
         )
         createdJobs[job.id] = job
         return False
     return True
 
 
-def _gather_circuit_qubits(
-        instructions: list[iqm_client.Instruction]) -> (set[int], int):
+def _gather_circuit_information(
+    instructions: list[iqm_client.Instruction],
+) -> tuple[set[int], int]:
     """Gather qubits from the circuit"""
     measurement_qubits: set[int] = set()
     all_qubits: set[int] = set()
     for instruction in instructions:
         all_qubits.update(
-            set(
-                _extract_qubit_position_from_qubit_name(qb)
-                for qb in list(instruction.qubits)))
+            _extract_qubit_position_from_qubit_name(qb)
+            for qb in list(instruction.qubits)
+        )
         if instruction.name == "measurement":
             measurement_qubits.update(
-                set(
-                    _extract_qubit_position_from_qubit_name(qb)
-                    for qb in list(instruction.qubits)))
+                _extract_qubit_position_from_qubit_name(qb)
+                for qb in list(instruction.qubits)
+            )
     return measurement_qubits, len(all_qubits)
 
 
-def _simulate_circuit(instructions: list[iqm_client.Instruction],
-                      shots: int) -> dict[str, int]:
+def _simulate_circuit(
+    instructions: list[iqm_client.Instruction], shots: int
+) -> dict[str, int]:
     """Simulate the circuit"""
     # extract qubits information from measurements
-    measurement_qubits_positions, total_qubits = _gather_circuit_qubits(
-        instructions)
+    measurement_qubits_positions, number_of_qubits = _gather_circuit_information(instructions)
 
     # calculate circuit operator and measure qubits
-    dims = [2] * total_qubits
+    dims = [2] * number_of_qubits
     D = np.prod(dims)
-    operator: np.ndarray = np.eye(2**total_qubits, dtype=complex)
+    operator: np.ndarray = np.eye(int(D), dtype=complex)
     operator = operator.reshape(2 * dims)
 
     for instruction in instructions:
         if instruction.name == "phased_rx":
             qubit_position = _extract_qubit_position_from_qubit_name(
-                instruction.qubits[0])
+                instruction.qubits[0]
+            )
             r_gate = _make_phased_rx_unitary_matrix(
                 float(instruction.args["angle_t"]) * (2.0 * np.pi),
-                float(instruction.args["phase_t"]) * (2.0 * np.pi))
-            operator = contract_einsum(r_gate, operator, [qubit_position],
-                                       [2] * 1, total_qubits)
+                float(instruction.args["phase_t"]) * (2.0 * np.pi),
+            )
+            operator = _contract_einsum(
+                r_gate, operator, [qubit_position], [2] * 1, number_of_qubits
+            )
         elif instruction.name == "cz":
             control_qubit_position = _extract_qubit_position_from_qubit_name(
-                instruction.qubits[0])
+                instruction.qubits[0]
+            )
             target_qubit_position = _extract_qubit_position_from_qubit_name(
-                instruction.qubits[1])
-            cz_gate = _make_cz_unitary_matrix(total_qubits)
-            operator = contract_einsum(
-                cz_gate, operator,
-                [control_qubit_position, target_qubit_position], [2] * 2,
-                total_qubits)
+                instruction.qubits[1]
+            )
+            cz_gate = _make_cz_unitary_matrix()
+            operator = _contract_einsum(
+                cz_gate,
+                operator,
+                [control_qubit_position, target_qubit_position],
+                [2] * 2,
+                number_of_qubits,
+            )
         else:
             continue
 
     operator = operator.reshape((D, D))
 
     # apply the constructed operator to the initial state
-    initial_state = np.array([0] * 2**total_qubits, dtype=complex)
+    initial_state = np.array([0] * 2**number_of_qubits, dtype=complex)
     initial_state[0] = 1
     final_state = np.matmul(operator, initial_state)
 
@@ -227,13 +238,16 @@ def _simulate_circuit(instructions: list[iqm_client.Instruction],
     density_matrix = np.outer(final_state, np.conj(final_state))
 
     # make partial density matrix for the measured subset of qubits
-    partial_trace = _partial_trace(total_qubits, density_matrix,
-                                   measurement_qubits_positions)
+    partial_trace = _partial_trace(
+        number_of_qubits, density_matrix, measurement_qubits_positions
+    )
     probabilities = np.diag(partial_trace)
     return {
-        ms: int(prob * shots) for ms, prob in zip(
+        ms: int(prob * shots)
+        for ms, prob in zip(
             _generate_measurement_strings(len(measurement_qubits_positions)),
-            probabilities)
+            probabilities,
+        )
     }
 
 
@@ -255,8 +269,7 @@ async def compile_and_submit_job(job: Job):
         # Simulate the circuit
         counts = _simulate_circuit(instructions, request.shots)
 
-        job.counts_batch.append(
-            Counts(counts=counts, measurement_keys=[circuit.name]))
+        job.counts_batch.append(Counts(counts=counts, measurement_keys=[circuit.name]))
 
     job.status = iqm_client.Status.READY
     job.result = iqm_client.RunResult(status=job.status, metadata=job.metadata)
@@ -264,8 +277,7 @@ async def compile_and_submit_job(job: Job):
 
 
 @app.get("/quantum-architecture")
-async def get_quantum_architecture(
-        request: Request) -> iqm_client.QuantumArchitecture:
+async def get_quantum_architecture(request: Request) -> iqm_client.QuantumArchitecture:
     """Get the quantum architecture"""
 
     access_token = request.headers.get("Authorization")
@@ -278,12 +290,14 @@ async def get_quantum_architecture(
             operations=operations,
             qubits=qubits,
             qubit_connectivity=qubit_connectivity,
-        ))
+        )
+    )
 
 
 @app.post("/jobs")
-async def post_jobs(job_request: iqm_client.RunRequest,
-                    request: Request) -> PostJobsResponse:
+async def post_jobs(
+    job_request: iqm_client.RunRequest, request: Request
+) -> PostJobsResponse:
     """Register a new job and start execution"""
 
     access_token = request.headers.get("Authorization")
@@ -335,12 +349,9 @@ async def get_jobs(job_id: str, request: Request):
 
     # TODO: return the actual counts, check the requested measurements
     results = {
-        "status":
-            job.status,
-        "message":
-            job.result.message if job.result and job.result.message else None,
-        "counts_batch":
-            job.counts_batch,
+        "status": job.status,
+        "message": job.result.message if job.result and job.result.message else None,
+        "counts_batch": job.counts_batch,
     }
 
     return results
